@@ -1,0 +1,17 @@
+bin/
+obj/
+.vs/
+node_modules/
+dist/
+release/
+RELEASE/
+deliverables/
+.vite/
+*.exe
+*.zip
+*.pdb
+*.user
+*.dyn
+*.dynx
+Thumbs.db
+desktop.ini
