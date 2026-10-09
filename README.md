@@ -9,7 +9,7 @@ và secret admin nên không được để public).
 
 | Thư mục | Mô tả | Git |
 |---------|-------|-----|
-| `TOOL CONVERT` | App Electron chuyển TXT → Excel (khối lượng Revit) | repo riêng (remote GitHub `APP_CONVERT-TXT-to-EXCEL-`) |
+| `TOOL CONVERT` | App Electron chuyển TXT → Excel (khối lượng Revit) | repo riêng (remote `origin` cũ `APP_CONVERT-TXT-to-EXCEL-` trên GitHub hiện không còn truy cập được) |
 | `TOOL MERGE` | Công cụ gộp bản vẽ AutoCAD (WinForms, .NET 8), có đăng nhập | repo riêng |
 | `REVIT ADDIN` | Add-in Revit (BIMLab Bách Khoa, member) + BIMLab Studio (leader) + DynLock auth server | repo riêng |
 | `Lastest/` | Bản phát hành mới nhất (exe + hướng dẫn + zip), sinh bởi `build_lastest.ps1` | không theo dõi |
