@@ -1,0 +1,39 @@
+HƯỚNG DẪN SỬ DỤNG BIMLab DWG MERGE
+
+Mục đích:
+- Gộp nhiều file DWG/BAK xuất từ Revit thành 1 file DWG duy nhất (GOP_CAD_MASTER.dwg)
+- Dùng khi cần gửi 1 file CAD tổng để bên nhận import/link vào Revit
+
+Trước khi bắt đầu:
+- Máy đã cài AutoCAD hoặc AutoCAD Core Console (bắt buộc, app dùng AutoCAD để tạo file gộp)
+- Có Gmail đã được cấp quyền sử dụng công cụ
+- Có sẵn thư mục hoặc các file DWG/BAK cần gộp
+
+1. Cài đặt
+- Chạy file `BIMLab DWG Merge.exe` (không cần cài đặt, chạy trực tiếp)
+
+2. Đăng nhập
+- Khi mở app, nhập Gmail đã được cấp quyền
+- Bấm `Đăng nhập`
+- Nếu báo "Gmail chưa được cấp quyền", liên hệ team lead để được thêm vào danh sách
+
+3. Gộp file DWG
+- Bấm `Thư mục` để chọn cả thư mục chứa DWG/BAK, hoặc `File CAD` để chọn từng file
+- Bấm `Phân loại` nếu cần kiểm tra/chỉnh lại danh sách file trước khi gộp
+- Chọn `Thư mục xuất kết quả`
+- Bấm `Tạo 1 file DWG`
+- Bấm `Chi tiết` để xem log quá trình chạy AutoCAD nếu cần theo dõi
+
+4. Kết quả
+- File `GOP_CAD_MASTER.dwg` nằm trong thư mục xuất kết quả đã chọn
+- Chỉ cần gửi đúng file này cho người nhận để họ import/link vào Revit
+
+5. Xử lý lỗi cơ bản
+- Đăng nhập thất bại: kiểm tra Gmail đã gõ đúng, kiểm tra kết nối mạng
+- "Không tìm thấy AutoCAD": cài AutoCAD hoặc AutoCAD Core Console trên máy rồi mở lại app
+- Gộp xong nhưng không thấy file master: bấm `Chi tiết` xem log lỗi AutoCAD
+
+Nếu cần hỗ trợ:
+- Gửi ảnh màn hình lỗi
+- Gửi log trong mục `Chi tiết`
+- Gửi Gmail đang dùng để đăng nhập
