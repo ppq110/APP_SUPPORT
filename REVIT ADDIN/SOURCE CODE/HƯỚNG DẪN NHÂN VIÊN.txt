@@ -1,0 +1,84 @@
+HƯỚNG DẪN SỬ DỤNG BIMLab BÁCH KHOA
+
+Bản phát hành: 15-07-2026
+
+Mục đích:
+- Cài đặt add-in cho Revit
+- Đăng nhập tài khoản đã được cấp quyền
+- Nạp file `.dynx` do team lead phát hành
+- Tạo nút trên ribbon Revit và chạy tool ổn định
+
+Phiên bản hỗ trợ:
+- Revit 2024
+- Revit 2025
+- Revit 2026
+
+Trước khi bắt đầu:
+- Đã cài Revit trên máy
+- Có quyền quản trị máy hoặc quyền cài đặt vào `C:\ProgramData\BIMLab\`
+- Có file `.dynx` do team lead gửi
+- Đã cài các Dynamo package mà graph cần dùng, nếu có
+
+1. Cài đặt phần mềm
+- Chạy `BIMLab Bách Khoa - 15-07-2026.exe`
+- Chọn phiên bản Revit đang dùng
+- Bấm `Cài add-in`
+- Nếu Windows hỏi quyền, chọn `Yes`
+- Mở lại Revit sau khi cài xong
+- Ở lần mở Revit đầu tiên, nếu xuất hiện bảng `Security - Unsigned Add-In`:
+  - Kiểm tra `Name` là `BIMLab`
+  - Kiểm tra `Location` bắt đầu bằng `C:\ProgramData\BIMLab\Revit\`
+  - Chọn `Always Load` để các lần sau Revit không hỏi lại
+
+2. Đăng nhập
+- Trong Revit, vào tab `BIMLab`
+- Bấm `Login`
+- Nhập email được cấp quyền
+- Đăng nhập thành công sẽ hiện trạng thái hợp lệ để tiếp tục nạp plugin
+
+3. Nạp plugin từ file `.dynx`
+- Vào tab `BIMLab`
+- Bấm `Load`
+- Chọn file `.dynx` do team lead cung cấp
+- Xem màn hình preview để kiểm tra:
+  - Tên panel
+  - Tên plugin
+  - Icon
+- Nếu hợp lệ, nút plugin sẽ được thêm vào ribbon
+
+4. Chạy tool
+- Bấm nút plugin vừa được nạp
+- Nhập các thông số cần thiết trên form
+- Nếu có chọn CAD, bấm `Chọn...` và chọn đối tượng trong Revit
+- Bấm `Chạy` để thực thi
+- Trong quá trình chạy không mở Dynamo UI, nên không cần tương tác thêm nếu không có thông báo lỗi
+
+5. Dấu hiệu chạy đúng
+- Nút plugin xuất hiện trong tab `BIMLab`
+- File `.dynx` không bị lộ nội dung graph
+- Form chỉ hiện các input cần thiết cho người dùng
+- Sau khi chạy xong, kết quả nằm ngay trong mô hình Revit
+
+6. Vị trí lưu file và cấu hình
+- `C:\ProgramData\BIMLab\Revit\` là nơi cài thư viện add-in BIMLab
+- Shortcut `BIMLab Scripts` trên Desktop mở nhanh thư mục lưu script `.dynx`
+- Dữ liệu và cấu hình BIMLab được phần mềm quản lý tự động; không tự ý xóa khi vẫn đang sử dụng
+- `%AppData%\Dynamo\Dynamo Revit\<version>\packages` là nơi Dynamo tìm package của máy người dùng
+
+7. Xử lý lỗi cơ bản
+- Không thấy tab `BIMLab`: kiểm tra đã cài add-in đúng phiên bản Revit chưa
+- Không load được `.dynx`: kiểm tra file có bị hỏng, sai đường dẫn, hoặc chưa được cấp quyền
+- Báo thiếu package: báo team lead cài đúng package còn thiếu hoặc gửi graph đã đóng gói lại
+- Đăng nhập thất bại: kiểm tra email, đường dẫn auth server, và kết nối mạng
+- Nút plugin bị mất sau khi mở lại Revit: bấm `Load` lại để nạp lại danh sách plugin
+
+8. Khuyến nghị để ổn định
+- Luôn mở lại Revit sau khi cài xong add-in
+- Không đổi tên file `.dynx` một cách thủ công nếu không cần
+- Khi có cập nhật graph, team lead nên mã hóa lại và gửi lại bản mới
+- Nếu máy mới chưa từng mở Dynamo, hãy mở một lần nếu graph cần package
+
+Nếu cần hỗ trợ:
+- Gửi ảnh màn hình lỗi
+- Gửi tên Revit đang dùng
+- Gửi tên file `.dynx` và thông báo lỗi xuất hiện

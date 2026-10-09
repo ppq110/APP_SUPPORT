@@ -1,0 +1,68 @@
+HƯỚNG DẪN TEAM LEAD - BIMLab STUDIO
+
+Bản phát hành: 15-07-2026
+
+Mục đích:
+- Mã hóa file Dynamo `.dyn` thành `.dynx`
+- Gắn metadata để add-in Revit tạo đúng panel và nút plugin
+- Tạo bản phát hành an toàn cho member
+
+Phiên bản được build hiện tại:
+- `BIMLab Studio - 15-07-2026.exe`
+
+Trước khi bắt đầu:
+- Đã có file `.dyn` hoàn chỉnh
+- Đã kiểm tra graph chạy đúng trong Dynamo
+- Đã cài các package mà graph cần dùng
+- Hiểu rõ rằng `.dynx` vẫn cần được chạy bằng add-in, không phải bằng Dynamo UI thông thường
+
+1. Chuẩn bị file
+- Mở `BIMLab Studio - 15-07-2026.exe`
+- Đăng nhập tài khoản leader
+- Chọn file `.dyn`
+- Kiểm tra lại tên file, icon và nội dung metadata
+
+2. Điền thông tin phát hành
+- `Panel`: tên panel hiện trên ribbon
+- `Plugin`: tên nút / tên công cụ
+- `Icon`: ảnh đại diện cho plugin
+- Nếu dự án có quy ước đặt tên, hãy giữ thống nhất giữa các bản phát hành
+
+3. Mã hóa
+- Bấm `Mã hóa tất cả`
+- Hệ thống tạo file `.dynx` cùng thư mục với file `.dyn`
+- File đầu ra cần được kiểm tra lại ngay sau khi tạo xong
+
+4. Kiểm tra chất lượng bản phát hành
+- Mở lại preview để xác nhận đúng tên panel và plugin
+- Nếu file `.dynx` đã được tạo, thử nạp lại bằng add-in Revit của member
+- Kiểm tra nút plugin hiện đúng vị trí và icon
+- Chạy test với input mẫu để đảm bảo không bị lỗi runtime
+
+5. Phát hành cho member
+- Chỉ gửi file `.dynx`
+- Không gửi file `.dyn` gốc nếu không cần thiết
+- Nếu có cập nhật graph, phải mã hóa lại bản mới và ghi rõ số phiên bản
+
+6. Kiểm tra khi member báo lỗi
+- Không hiện nút plugin: kiểm tra metadata trong `.dynx`
+- Báo thiếu package: kiểm tra graph có node nào phụ thuộc package bên ngoài
+- Lỗi khi chạy: mở lại graph gốc, test trước trong Dynamo, sau đó mã hóa lại
+- Member không đăng nhập được: kiểm tra auth server và email đã được cấp quyền
+
+7. Quy ước để ổn định
+- Mỗi bản phát hành nên có ngày tháng và số phiên bản
+- Không đổi key, cấu hình, hoặc luồng graph mà không test lại
+- Nếu có thay đổi input, cập nhật luôn hướng dẫn cho member
+- Nếu graph phụ thuộc package, ghi rõ tên package trong tài liệu nội bộ
+
+8. Kiến nghị release
+- Test trên ít nhất 1 máy leader
+- Test trên ít nhất 1 máy member
+- Kiểm tra quy trình: đăng nhập -> load -> tạo nút -> chạy -> xem kết quả
+
+Kết quả cần đạt:
+- File `.dynx` tạo ra thành công
+- Member load được plugin từ `.dynx`
+- Nút plugin chạy ổn định, không mở Dynamo UI
+- Tài liệu phát hành rõ ràng, dễ bàn giao

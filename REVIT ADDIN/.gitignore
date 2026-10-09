@@ -1,0 +1,11 @@
+## .NET build output
+[Bb]in/
+[Oo]bj/
+.vs/
+*.user
+
+## OS / editor
+Thumbs.db
+desktop.ini
+*.log
+*.tmp

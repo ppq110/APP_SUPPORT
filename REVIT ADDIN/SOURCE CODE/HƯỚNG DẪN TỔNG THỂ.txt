@@ -1,0 +1,38 @@
+HƯỚNG DẪN TỔNG THỂ - BIMLab DynLock
+
+Hệ thống có 2 app chính:
+
+1. BIMLab Studio - Leader
+- Mở file `.dyn`
+- Điền Panel, Plugin, Icon
+- Bấm `Mã hóa tất cả`
+- Tạo file `.dynx`
+- File `.dynx` chứa:
+  - graph đã mã hóa
+  - tên panel
+  - tên plugin
+  - icon
+  - tên file gốc
+
+2. BIMLab Bách Khoa - Member
+- Cài add-in vào Revit
+- Đăng nhập
+- Load file `.dynx`
+- Xem preview
+- Chạy plugin trong ribbon
+
+Luồng dùng:
+- Leader tạo `.dynx`
+- Member nhận `.dynx`
+- Member load `.dynx`
+- App tạo nút ribbon động trong session hiện tại
+- Member chọn input và chạy script
+
+Thư mục quan trọng:
+- `C:\ProgramData\BIMLab\DynLock\Scripts\`
+- `%AppData%\Dynamo\Dynamo Revit\<version>\packages`
+
+Lưu ý:
+- Leader chỉ gửi file `.dynx`, không gửi file `.dyn`
+- Member không cần quản lý ribbon bằng tay
+- Nếu file cũ không có metadata, app vẫn có thể load bằng tên file mặc định
