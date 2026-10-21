@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Reflection;
 
@@ -20,6 +21,7 @@ internal sealed class MainForm : Form
     private readonly TextBox _logBox = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top | AnchorStyles.Bottom };
     private readonly List<DwgSourceItem> _sourceItems = [];
     private bool _detailsVisible;
+    private bool _busy;
 
     public MainForm()
     {
@@ -236,16 +238,21 @@ internal sealed class MainForm : Form
                 ? _sourceItems[0].Path
                 : $"Đã chọn {_sourceItems.Count} file CAD";
             _includeSubfolders.Enabled = false;
-            SetStatus($"Đã chọn {_sourceItems.Count} file CAD.");
         }
     }
 
     private bool LoadSourceItems(IEnumerable<string> paths)
     {
-        List<DwgSourceItem> items = paths
+        List<string> candidates = paths
             .Where(DwgPackager.IsCadDrawingSource)
             .Where(File.Exists)
             .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        // AutoCAD tự tạo X.bak (bản lưu cũ) cạnh X.dwg: bỏ bản .bak để mỗi bản vẽ chỉ được gộp một lần.
+        candidates = DwgPackager.RemoveBackupDuplicates(candidates, out int duplicateBackups);
+
+        List<DwgSourceItem> items = candidates
             .Select(path => new DwgSourceItem(path, DwgSourceKind.DirectMerge))
             .ToList();
 
@@ -264,6 +271,15 @@ internal sealed class MainForm : Form
         _sourceItems.Clear();
         _sourceItems.AddRange(dialog.Items);
         _classifyButton.Enabled = _sourceItems.Count > 0;
+
+        string status = $"Đã chọn {_sourceItems.Count} file CAD.";
+        if (duplicateBackups > 0)
+        {
+            status += $" Đã bỏ {duplicateBackups} file .bak trùng tên với file .dwg.";
+            Log($"Bỏ {duplicateBackups} file .bak trùng tên với file .dwg (bản lưu cũ do AutoCAD tự tạo).");
+        }
+
+        SetStatus(status);
         return true;
     }
 
@@ -295,13 +311,20 @@ internal sealed class MainForm : Form
 
     private async void CreatePackage()
     {
+        DwgPackResult? result = null;
         try
         {
-            _createButton.Enabled = false;
+            SetBusy(true);
             ResetProgress();
             if (_sourceItems.Count == 0)
             {
                 throw new InvalidOperationException("Chưa chọn nguồn DWG/BAK.");
+            }
+
+            string outputRoot = _outputBox.Text.Trim();
+            if (outputRoot.Length == 0)
+            {
+                throw new InvalidOperationException("Chưa chọn thư mục xuất kết quả.");
             }
 
             _autoCadConsolePath ??= DwgPackager.FindAutoCadCoreConsole();
@@ -310,52 +333,121 @@ internal sealed class MainForm : Form
                 throw new InvalidOperationException("Không tìm thấy AutoCAD Core Console. Hãy cài AutoCAD trên máy này rồi chạy lại app.");
             }
 
+            // Chụp lại danh sách file, đường dẫn xuất và AutoCAD trước khi chạy nền: luồng nền không được
+            // đọc điều khiển giao diện, và danh sách gốc không được thay đổi giữa chừng.
+            List<DwgSourceItem> items = [.. _sourceItems];
+            string autoCadPath = _autoCadConsolePath;
+
             Log("Đang tạo gói CAD...");
             SetStatus("Đang chuẩn bị dữ liệu...");
             CadMergeMode mergeMode = CadMergeMode.StandaloneDwg;
             Progress<CadProgress> progress = new(UpdateProgress);
 
-            DwgPackResult result = await Task.Run(() => DwgPackager.CreatePackage(
-                    _sourceItems,
-                    _outputBox.Text.Trim(),
-                    _autoCadConsolePath,
-                    mergeMode,
-                    progress));
+            result = await Task.Run(() => DwgPackager.CreatePackage(items, outputRoot, autoCadPath, mergeMode, progress));
 
             Log($"Đã copy {result.DwgCount} file DWG.");
             Log("Đã tạo script AutoCAD.");
 
             Log("Đang chạy AutoCAD Core Console để tạo 1 file DWG...");
             UpdateProgress(new CadProgress(0, result.DwgCount, "AutoCAD đang bắt đầu", string.Empty));
-            await DwgPackager.RunAutoCadScriptAsync(_autoCadConsolePath, result.InputDrawingPath, result.ScriptPath, result.ConsoleLogPath, result.MasterDwgPath, progress, Log);
-            Log(File.Exists(result.MasterDwgPath)
-                ? $"Đã tạo file DWG: {result.MasterDwgPath}"
-                : $"AutoCAD đã chạy xong nhưng chưa thấy file master DWG. Hãy kiểm tra log: {result.ConsoleLogPath}");
+            await DwgPackager.RunAutoCadScriptAsync(autoCadPath, result.InputDrawingPath, result.ScriptPath, result.ConsoleLogPath, result.MasterDwgPath, progress, Log);
 
-            if (File.Exists(result.MasterDwgPath))
+            if (!File.Exists(result.MasterDwgPath))
             {
-                UpdateProgress(new CadProgress(result.DwgCount, result.DwgCount, "Hoàn thành", Path.GetFileName(result.MasterDwgPath)));
-                SetStatus($"Hoàn thành: {Path.GetFileName(result.MasterDwgPath)}");
-                Log($"File kết quả: {result.MasterDwgPath}");
-                DwgPackager.DeleteWorkingFolder(result.PackageFolder);
+                Log($"AutoCAD đã chạy xong nhưng chưa thấy file master DWG. Hãy kiểm tra log: {result.ConsoleLogPath}");
+                SetStatus("Chưa thấy file master DWG. Bấm Chi tiết để xem log.");
+                return;
             }
 
-            Process.Start(new ProcessStartInfo(Path.GetDirectoryName(result.MasterDwgPath) ?? result.PackageFolder) { UseShellExecute = true });
+            // Đưa master ra thư mục xuất, ghi file danh sách đối chiếu Sheet_xxx <-> file gốc, dọn thư mục làm việc.
+            (string masterPath, string? listPath) = DwgPackager.PublishResult(result);
+            UpdateProgress(new CadProgress(result.DwgCount, result.DwgCount, "Hoàn thành", Path.GetFileName(masterPath)));
+            SetStatus($"Hoàn thành: {Path.GetFileName(masterPath)}");
+            Log($"Đã tạo file DWG: {masterPath}");
+            Log(listPath is null
+                ? "Không ghi được file danh sách đối chiếu Sheet với file gốc."
+                : $"Danh sách đối chiếu Sheet_xxx với file gốc: {listPath}");
+
+            try
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{masterPath}\"") { UseShellExecute = true });
+            }
+            catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+            {
+                Log("Không mở được thư mục kết quả: " + ex.Message);
+            }
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            string detail = ex.Message;
+            if (result is not null && Directory.Exists(result.PackageFolder))
+            {
+                detail += Environment.NewLine + Environment.NewLine + "Thư mục làm việc (có log AutoCAD): " + result.PackageFolder;
+            }
+
+            MessageBox.Show(this, detail, "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
             SetStatus("Có lỗi xảy ra. Bấm Chi tiết để xem log.");
             Log("LỖI: " + ex.Message);
         }
         finally
         {
-            _createButton.Enabled = true;
+            SetBusy(false);
         }
     }
 
+    // Trong lúc gộp, khoá các nút đổi nguồn/phân loại: danh sách file không được đổi giữa chừng.
+    private void SetBusy(bool busy)
+    {
+        _busy = busy;
+        _createButton.Enabled = !busy;
+        _pickFilesButton.Enabled = !busy;
+        _pickFolderButton.Enabled = !busy;
+        _classifyButton.Enabled = !busy && _sourceItems.Count > 0;
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (_busy && e.CloseReason == CloseReason.UserClosing)
+        {
+            DialogResult answer = MessageBox.Show(
+                this,
+                "Đang gộp file. Thoát bây giờ sẽ bỏ dở và AutoCAD có thể còn chạy nền thêm một lúc.\n\nVẫn thoát?",
+                "BIMLab DWG Merge",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+            if (answer != DialogResult.Yes)
+            {
+                e.Cancel = true;
+                return;
+            }
+        }
+
+        base.OnFormClosing(e);
+    }
+
+    // Có thể bị gọi từ luồng đọc output của AutoCAD (không phải luồng giao diện) nên phải chuyển về luồng UI.
     private void Log(string message)
     {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        if (InvokeRequired)
+        {
+            try
+            {
+                BeginInvoke(new Action(() => Log(message)));
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
+            {
+                // Cửa sổ đã đóng: bỏ qua dòng log.
+            }
+
+            return;
+        }
+
         _logBox.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}");
     }
 

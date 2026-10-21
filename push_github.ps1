@@ -62,7 +62,7 @@ Write-Host "=== Đồng bộ source sang GITHUB\ ===" -ForegroundColor Cyan
 
 # Thư mục/tệp KHÔNG đưa lên GitHub: file build, bản phát hành, mẫu CAD, script Dynamo gốc,
 # workflow Supabase cũ (chứa khóa cũ).
-$excludeDirs  = @(".git", "bin", "obj", ".vs", "node_modules", "dist", "release",
+$excludeDirs  = @(".git", "bin", "obj", ".vs", "node_modules", "dist", "release*",
                   "deliverables", ".vite", "SAMPLE CAD FILES", "bimlab-keepalive")
 $excludeFiles = @("*.exe", "*.zip", "*.pdb", "*.user", "*.log", "*.tmp", "*.dyn", "*.dynx")
 
@@ -76,7 +76,7 @@ foreach ($t in $tools) {
     Write-Host "  OK: $t"
 }
 
-foreach ($f in @("README.md", "build_lastest.ps1", "push_github.ps1")) {
+foreach ($f in @("README.md", "build_all.ps1", "build_lastest.ps1", "push_github.ps1")) {
     Copy-Item -LiteralPath (Join-Path $root $f) -Destination $repo -Force -ErrorAction Stop
 }
 
@@ -87,7 +87,9 @@ obj/
 node_modules/
 dist/
 release/
+release-nologin/
 RELEASE/
+RELEASE_NOLOGIN/
 deliverables/
 .vite/
 *.exe

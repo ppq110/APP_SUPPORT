@@ -10,6 +10,16 @@
     <ApplicationIcon>Resources\BimDynamo.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <!-- Mặc định BẮT đăng nhập. Build với /p:RequireLogin=false (build_release.ps1 -NoLogin) ra bản
+       "không cần tài khoản": bỏ hẳn code đăng nhập khỏi exe (không còn gọi máy chủ xác thực). -->
+  <PropertyGroup Condition="'$(RequireLogin)' != 'false'">
+    <DefineConstants>$(DefineConstants);REQUIRE_LOGIN</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(RequireLogin)' == 'false'">
+    <Compile Remove="AuthGate.cs" />
+    <Compile Remove="LoginForm.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <EmbeddedResource Include="Resources\bimlab-logo-light-wide.png" />
   </ItemGroup>

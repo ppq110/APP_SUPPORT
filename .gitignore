@@ -4,7 +4,9 @@ obj/
 node_modules/
 dist/
 release/
+release-nologin/
 RELEASE/
+RELEASE_NOLOGIN/
 deliverables/
 .vite/
 *.exe

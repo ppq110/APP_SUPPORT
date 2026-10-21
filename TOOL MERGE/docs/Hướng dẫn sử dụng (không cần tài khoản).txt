@@ -1,0 +1,34 @@
+HƯỚNG DẪN SỬ DỤNG BIMLab DWG MERGE
+
+Mục đích:
+- Gộp nhiều file DWG/BAK xuất từ Revit thành 1 file DWG duy nhất (GOP_CAD_MASTER.dwg)
+- Dùng khi cần gửi 1 file CAD tổng để bên nhận import/link vào Revit
+
+Trước khi bắt đầu:
+- Máy đã cài AutoCAD hoặc AutoCAD Core Console (bắt buộc, app dùng AutoCAD để tạo file gộp)
+- Có sẵn thư mục hoặc các file DWG/BAK cần gộp
+
+1. Cài đặt
+- Chạy file `BIMLab DWG Merge.exe` (không cần cài đặt, chạy trực tiếp)
+- Bản này không cần tài khoản/Gmail và không cần kết nối mạng
+
+2. Gộp file DWG
+- Bấm `Thư mục` để chọn cả thư mục chứa DWG/BAK, hoặc `File CAD` để chọn từng file
+- Bấm `Phân loại` nếu cần kiểm tra/chỉnh lại danh sách file trước khi gộp: bỏ tick những file không muốn gộp
+- Nếu thư mục có cả `X.dwg` và `X.bak` cùng tên (AutoCAD tự tạo `.bak` là bản lưu cũ), app tự bỏ bản `.bak` để không bị gộp trùng
+- Chọn `Thư mục xuất kết quả`
+- Bấm `Tạo 1 file DWG`
+- Bấm `Chi tiết` để xem log quá trình chạy AutoCAD nếu cần theo dõi
+
+3. Kết quả
+- File `GOP_CAD_MASTER_<ngày_giờ>.dwg` nằm trong thư mục xuất kết quả đã chọn
+- Cạnh đó có file `GOP_CAD_MASTER_<ngày_giờ>_DANH_SACH.csv` (mở bằng Excel) cho biết các layout `Sheet_001`, `Sheet_002`... trong master ứng với file gốc nào
+- Chỉ cần gửi đúng file này cho người nhận để họ import/link vào Revit
+
+4. Xử lý lỗi cơ bản
+- "Không tìm thấy AutoCAD": cài AutoCAD hoặc AutoCAD Core Console trên máy rồi mở lại app
+- Gộp xong nhưng không thấy file master: bấm `Chi tiết` xem log lỗi AutoCAD
+
+Nếu cần hỗ trợ:
+- Gửi ảnh màn hình lỗi
+- Gửi log trong mục `Chi tiết`

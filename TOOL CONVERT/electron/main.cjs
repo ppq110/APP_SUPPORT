@@ -11,6 +11,12 @@ const isDev     = process.env.VITE_DEV_SERVER_URL;
 // Only a new build can change this.
 const AUTH_SERVER_URL = 'https://tools.bimlab.com.vn';
 
+// Bản "không cần tài khoản" được build bằng `npm run dist:nologin`
+// (electron-builder ghi requireLogin=false vào package.json đóng gói): bản đó
+// không hỏi email và không gọi máy chủ xác thực. Mặc định (kể cả `npm run
+// desktop`) vẫn bắt đăng nhập.
+const REQUIRE_LOGIN = require('../package.json').requireLogin !== false;
+
 app.setName(APP_TITLE);
 
 // Fire-and-forget as soon as the process starts, well before the login
@@ -20,12 +26,14 @@ app.setName(APP_TITLE);
 // "Đăng nhập", the real check only pays for the request itself. Hits
 // /api/health (not rate-limited, not proxied to the backend - nginx
 // answers 404 directly) purely to warm the connection.
-fetch(`${AUTH_SERVER_URL}/api/health`).catch(() => {});
+if (REQUIRE_LOGIN) {
+  fetch(`${AUTH_SERVER_URL}/api/health`).catch(() => {});
+}
 
 // Runs in the trusted main process (not the sandboxed renderer) so the
 // request isn't subject to browser CORS and the server URL can't be seen
 // or swapped by anything running in the page.
-ipcMain.handle('auth:check', async (_event, rawEmail) => {
+async function checkAuth(_event, rawEmail) {
   const email = String(rawEmail || '').trim().toLowerCase();
   if (!email || !email.includes('@') || !email.includes('.')) {
     return { ok: false, error: 'Gmail không hợp lệ.' };
@@ -52,7 +60,11 @@ ipcMain.handle('auth:check', async (_event, rawEmail) => {
   } catch (err) {
     return { ok: false, error: 'Không kết nối được máy chủ xác thực: ' + err.message };
   }
-});
+}
+
+if (REQUIRE_LOGIN) {
+  ipcMain.handle('auth:check', checkAuth);
+}
 
 function createWindow() {
   const mainWindow = new BrowserWindow({

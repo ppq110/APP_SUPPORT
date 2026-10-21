@@ -1104,6 +1104,9 @@ function LoginScreen({ onSuccess }) {
   );
 }
 
+// Bản "không cần tài khoản" được build với VITE_REQUIRE_LOGIN=false (npm run dist:nologin).
+const REQUIRE_LOGIN = import.meta.env.VITE_REQUIRE_LOGIN !== 'false';
+
 function Root() {
   const [session, setSession] = useState(null);
 
@@ -1114,7 +1117,7 @@ function Root() {
     window.electronBridge?.appReady(true);
   }, []);
 
-  if (!session) {
+  if (REQUIRE_LOGIN && !session) {
     return <LoginScreen onSuccess={setSession} />;
   }
 

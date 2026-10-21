@@ -21,6 +21,10 @@ internal enum DwgSourceKind
 
 internal sealed record DwgSourceItem(string Path, DwgSourceKind Kind);
 
+// MasterDwgPath là nơi AutoCAD lưu master (luôn là đường dẫn ASCII, xem ResolveWorkRoot);
+// FinalMasterDwgPath là nơi người dùng muốn nhận kết quả (thư mục xuất). Hai đường dẫn này
+// giống nhau trừ khi thư mục xuất có ký tự không phải ASCII (vd. dấu tiếng Việt).
+// Sources: danh sách file đã gộp, đúng thứ tự Sheet_001, Sheet_002... / CAD_0001, CAD_0002...
 internal sealed record DwgPackResult(
     string PackageFolder,
     string CadFolder,
@@ -31,7 +35,9 @@ internal sealed record DwgPackResult(
     string LispPath,
     string BatchPath,
     string ZipPath,
-    int DwgCount);
+    int DwgCount,
+    string FinalMasterDwgPath,
+    IReadOnlyList<DwgSourceItem> Sources);
 
 internal sealed record CadProgress(int Current, int Total, string Stage, string FileName);
 
@@ -144,31 +150,28 @@ internal static class DwgPackager
         return match.Success && int.TryParse(match.Value, out int year) ? year : 0;
     }
 
-    public static DwgPackResult CreatePackage(
-        string sourceFolder,
-        IReadOnlyList<string>? selectedFiles,
-        string outputRoot,
-        bool includeSubfolders,
-        CadMergeMode mergeMode,
-        IProgress<CadProgress>? progress = null)
+    // AutoCAD tự tạo file .bak (bản lưu cũ) cạnh mỗi .dwg. Nếu trong danh sách đã có X.dwg thì bỏ
+    // X.bak cùng thư mục, cùng tên: gộp cả hai sẽ ra 2 bản của cùng một bản vẽ (cả bản cũ lẫn bản mới).
+    // File .bak không có .dwg đi kèm (vd. đã đổi tên) vẫn được giữ lại.
+    public static List<string> RemoveBackupDuplicates(IEnumerable<string> paths, out int removedCount)
     {
-        if ((selectedFiles is null || selectedFiles.Count == 0) && !Directory.Exists(sourceFolder))
+        List<string> all = paths.ToList();
+        HashSet<string> dwgKeys = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string path in all)
         {
-            throw new DirectoryNotFoundException("Không tìm thấy thư mục DWG đầu vào.");
+            if (Path.GetExtension(path).Equals(".dwg", StringComparison.OrdinalIgnoreCase))
+            {
+                dwgKeys.Add(Path.ChangeExtension(path, null));
+            }
         }
 
-        List<string> sourceDwgs = GetSourceDwgs(sourceFolder, selectedFiles, includeSubfolders);
-
-        if (sourceDwgs.Count == 0)
-        {
-            throw new InvalidOperationException("Không có file .dwg/.bak nào để gộp.");
-        }
-
-        List<DwgSourceItem> sourceItems = sourceDwgs
-            .Select(path => new DwgSourceItem(path, DwgSourceKind.DirectMerge))
+        List<string> kept = all
+            .Where(path => !Path.GetExtension(path).Equals(".bak", StringComparison.OrdinalIgnoreCase)
+                           || !dwgKeys.Contains(Path.ChangeExtension(path, null)))
             .ToList();
 
-        return CreatePackage(sourceItems, outputRoot, null, mergeMode, progress);
+        removedCount = all.Count - kept.Count;
+        return kept;
     }
 
     public static DwgPackResult CreatePackage(
@@ -182,6 +185,13 @@ internal static class DwgPackager
         {
             throw new InvalidOperationException("Chưa chọn file DWG nào để gộp.");
         }
+
+        if (string.IsNullOrWhiteSpace(outputRoot))
+        {
+            throw new InvalidOperationException("Chưa chọn thư mục xuất kết quả.");
+        }
+
+        outputRoot = Path.GetFullPath(outputRoot.Trim());
 
         List<DwgSourceItem> validItems = sourceItems
             .Where(item => File.Exists(item.Path))
@@ -200,15 +210,18 @@ internal static class DwgPackager
         progress?.Report(new CadProgress(0, validItems.Count, "Tìm thấy DWG", $"{validItems.Count} file"));
 
         string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
-        string packageFolder = Path.Combine(outputRoot, "_GOP_CAD_WORK_" + timestamp);
+        string workRoot = ResolveWorkRoot(outputRoot);
+        string packageFolder = Path.Combine(workRoot, "_GOP_CAD_WORK_" + timestamp);
         string cadFolder = Path.Combine(packageFolder, "CAD_LINKS");
         Directory.CreateDirectory(cadFolder);
 
         List<string> preparedDwgs = PrepareSourceDwgs(validItems, packageFolder, accoreConsolePath, progress);
         List<string> copiedDwgs = CopyDwgs(packageFolder, cadFolder, preparedDwgs, false, progress);
-        CleanupCopiedDwgsForMerge(copiedDwgs, accoreConsolePath, packageFolder, progress);
+        CleanupCopiedDwgsForMerge(copiedDwgs, validItems.Select(item => Path.GetFileName(item.Path)).ToList(), accoreConsolePath, packageFolder, progress);
 
-        string masterDwgPath = Path.Combine(outputRoot, "GOP_CAD_MASTER_" + timestamp + ".dwg");
+        string masterName = "GOP_CAD_MASTER_" + timestamp + ".dwg";
+        string masterDwgPath = Path.Combine(workRoot, masterName);
+        string finalMasterDwgPath = Path.Combine(outputRoot, masterName);
         string inputDrawingPath = Path.Combine(packageFolder, "blank_input.dxf");
         string consoleLogPath = Path.Combine(packageFolder, "AUTOCAD_CONSOLE_LOG.txt");
         string scriptName = mergeMode == CadMergeMode.StandaloneDwg ? "tao_master_doc_lap.scr" : "tao_master_xref.scr";
@@ -217,13 +230,140 @@ internal static class DwgPackager
         string lispPath = Path.Combine(packageFolder, "gopcad_merge_layouts.lsp");
         string batchPath = Path.Combine(packageFolder, batchName);
 
+        // Tên hiển thị trên thanh tiến trình: tên file gốc bỏ dấu (AutoCAD chỉ in ra ASCII được an toàn).
+        List<string> displayNames = validItems.Select(item => ToAsciiDisplayName(item.Path)).ToList();
+
         File.WriteAllText(inputDrawingPath, BuildBlankDxf(), Encoding.ASCII);
-        File.WriteAllText(lispPath, BuildAutoCadLispSafe(copiedDwgs, masterDwgPath, mergeMode), Encoding.Default);
+        File.WriteAllText(lispPath, BuildAutoCadLispSafe(copiedDwgs, displayNames, masterDwgPath, mergeMode), Encoding.Default);
         File.WriteAllText(scriptPath, BuildAutoCadScript(lispPath), Encoding.Default);
         File.WriteAllText(batchPath, BuildBatch(scriptPath, inputDrawingPath), Encoding.Default);
         File.WriteAllText(Path.Combine(packageFolder, "HUONG_DAN.txt"), BuildInstructions(masterDwgPath, scriptPath, batchPath, packageFolder + ".zip", mergeMode), Encoding.UTF8);
 
-        return new DwgPackResult(packageFolder, cadFolder, masterDwgPath, inputDrawingPath, consoleLogPath, scriptPath, lispPath, batchPath, packageFolder + ".zip", copiedDwgs.Count);
+        return new DwgPackResult(packageFolder, cadFolder, masterDwgPath, inputDrawingPath, consoleLogPath, scriptPath, lispPath, batchPath, packageFolder + ".zip", copiedDwgs.Count, finalMasterDwgPath, validItems);
+    }
+
+    // Gọi sau khi AutoCAD đã tạo xong master: đưa master ra thư mục xuất, ghi file danh sách đối chiếu
+    // (Sheet_001 <-> tên file gốc) rồi xoá thư mục làm việc. ListPath = null nếu không ghi được danh sách.
+    public static (string MasterPath, string? ListPath) PublishResult(DwgPackResult result)
+    {
+        string masterPath = result.FinalMasterDwgPath;
+        if (!string.Equals(result.MasterDwgPath, masterPath, StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                File.Move(result.MasterDwgPath, masterPath, overwrite: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new InvalidOperationException(
+                    $"Đã tạo xong master nhưng không chuyển được ra thư mục xuất. File đang nằm ở: {result.MasterDwgPath}{Environment.NewLine}{ex.Message}",
+                    ex);
+            }
+        }
+
+        string? listPath = Path.ChangeExtension(masterPath, null) + "_DANH_SACH.csv";
+        try
+        {
+            // UTF-8 có BOM để Excel hiển thị đúng tiếng Việt.
+            File.WriteAllText(listPath, BuildMappingCsv(result.Sources), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            listPath = null;
+        }
+
+        DeleteWorkingFolder(result.PackageFolder);
+        return (masterPath, listPath);
+    }
+
+    private static string BuildMappingCsv(IReadOnlyList<DwgSourceItem> sources)
+    {
+        StringBuilder csv = new();
+        csv.AppendLine("Layout (Sheet),Block (CAD),Tên file gốc,Đường dẫn gốc,Cách xử lý");
+        for (int i = 0; i < sources.Count; i++)
+        {
+            DwgSourceItem item = sources[i];
+            string kind = item.Kind == DwgSourceKind.ExportLayoutFirst ? "Loại 2 - Export layout trước" : "Loại 1 - Gộp trực tiếp";
+            csv.AppendLine(CultureInfo.InvariantCulture,
+                $"Sheet_{i + 1:000},CAD_{i + 1:0000},{CsvField(Path.GetFileName(item.Path))},{CsvField(item.Path)},{CsvField(kind)}");
+        }
+
+        return csv.ToString();
+    }
+
+    private static string CsvField(string value)
+    {
+        return "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
+    }
+
+    // Tên file gốc bỏ dấu tiếng Việt, chỉ giữ ký tự ASCII in được, để in lên log/thanh tiến trình của AutoCAD.
+    private static string ToAsciiDisplayName(string path)
+    {
+        string normalized = Path.GetFileName(path).Normalize(NormalizationForm.FormD);
+        StringBuilder name = new();
+        foreach (char c in normalized)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.NonSpacingMark)
+            {
+                continue;
+            }
+
+            char mapped = c switch { 'đ' => 'd', 'Đ' => 'D', _ => c };
+            name.Append(mapped is >= ' ' and <= '~' and not ('|' or '"' or '\\') ? mapped : '_');
+        }
+
+        return name.Length > 80 ? name.ToString(0, 80) : name.ToString();
+    }
+
+    private static bool IsAscii(string value)
+    {
+        return value.All(c => c < 128);
+    }
+
+    // AutoCAD đọc script/lisp theo bảng mã ANSI nhưng app ghi file bằng UTF-8 (Encoding.Default trên .NET 8),
+    // nên đường dẫn có dấu tiếng Việt (vd. C:\Users\Nguyễn\Desktop) có thể bị đọc sai. Khi thư mục xuất có ký tự
+    // không phải ASCII, AutoCAD làm việc trong một thư mục ASCII (ProgramData...) và master được chuyển ra
+    // thư mục xuất sau cùng (PublishResult). Không tìm được thư mục ASCII thì dùng luôn thư mục xuất như cũ.
+    private static string ResolveWorkRoot(string outputRoot)
+    {
+        if (IsAscii(outputRoot))
+        {
+            return outputRoot;
+        }
+
+        string? publicRoot = Environment.GetEnvironmentVariable("PUBLIC");
+        string?[] candidates =
+        [
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "BIMLab", "DwgMerge"),
+            string.IsNullOrEmpty(publicRoot) ? null : Path.Combine(publicRoot, "BIMLab", "DwgMerge"),
+            Path.Combine(Path.GetTempPath(), "BIMLab_DwgMerge")
+        ];
+
+        foreach (string? candidate in candidates)
+        {
+            if (candidate is not null && IsAscii(candidate) && TryUseFolder(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return outputRoot;
+    }
+
+    private static bool TryUseFolder(string folder)
+    {
+        try
+        {
+            Directory.CreateDirectory(folder);
+            string probe = Path.Combine(folder, ".write_" + Guid.NewGuid().ToString("N"));
+            File.WriteAllText(probe, "x");
+            File.Delete(probe);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
     }
 
     private static List<string> PrepareSourceDwgs(
@@ -354,28 +494,6 @@ internal static class DwgPackager
         CleanupExportedLayoutDwg(outputDwgPath, accoreConsolePath, exportFolder, index);
     }
 
-    private static List<string> GetSourceDwgs(string sourceFolder, IReadOnlyList<string>? selectedFiles, bool includeSubfolders)
-    {
-        if (selectedFiles is { Count: > 0 })
-        {
-            return selectedFiles
-                .Where(IsCadDrawingSource)
-                .Where(File.Exists)
-                .Where(path => !Path.GetFileName(path).StartsWith("GOP_CAD_MASTER", StringComparison.OrdinalIgnoreCase))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(path => path, StringComparer.CurrentCultureIgnoreCase)
-                .ToList();
-        }
-
-        SearchOption searchOption = includeSubfolders ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
-        return Directory
-            .EnumerateFiles(sourceFolder, "*.*", searchOption)
-            .Where(IsCadDrawingSource)
-            .Where(path => !Path.GetFileName(path).StartsWith("GOP_CAD_MASTER", StringComparison.OrdinalIgnoreCase))
-            .OrderBy(path => path, StringComparer.CurrentCultureIgnoreCase)
-            .ToList();
-    }
-
     public static bool IsCadDrawingSource(string path)
     {
         string extension = Path.GetExtension(path);
@@ -450,36 +568,6 @@ internal static class DwgPackager
         }
     }
 
-    private static string GetCopyRoot(string sourceFolder, List<string> sourceDwgs, IReadOnlyList<string>? selectedFiles)
-    {
-        if (selectedFiles is null || selectedFiles.Count == 0)
-        {
-            return sourceFolder;
-        }
-
-        string? common = sourceDwgs
-            .Select(Path.GetDirectoryName)
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Aggregate<string?, string?>(null, (current, path) => current is null ? path : GetCommonDirectory(current, path!));
-
-        return common ?? Path.GetDirectoryName(sourceDwgs[0]) ?? Environment.CurrentDirectory;
-    }
-
-    private static string GetCommonDirectory(string first, string second)
-    {
-        string[] firstParts = Path.GetFullPath(first).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        string[] secondParts = Path.GetFullPath(second).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        int length = Math.Min(firstParts.Length, secondParts.Length);
-        int index = 0;
-
-        while (index < length && string.Equals(firstParts[index], secondParts[index], StringComparison.OrdinalIgnoreCase))
-        {
-            index++;
-        }
-
-        return index == 0 ? Path.GetPathRoot(first) ?? first : string.Join(Path.DirectorySeparatorChar, firstParts.Take(index));
-    }
-
     public static async Task RunAutoCadScriptAsync(
         string accoreConsolePath,
         string inputDrawingPath,
@@ -525,7 +613,7 @@ internal static class DwgPackager
             if (parsed is not null)
             {
                 progress?.Report(parsed);
-                logLine?.Invoke($"{parsed.Stage}: {parsed.Current}/{parsed.Total} - {parsed.FileName}");
+                SafeLog(logLine, $"{parsed.Stage}: {parsed.Current}/{parsed.Total} - {parsed.FileName}");
             }
         };
         process.ErrorDataReceived += (_, args) =>
@@ -548,15 +636,48 @@ internal static class DwgPackager
         WriteConsoleLog(consoleLogPath, output, error);
 
         string combinedLog = output + Environment.NewLine + error;
-        if ((!killedAfterOutput && process.ExitCode != 0) || HasAutoCadFailure(combinedLog))
+        bool outputExists = !string.IsNullOrWhiteSpace(expectedOutputPath) && File.Exists(expectedOutputPath);
+
+        // Lỗi do chính script báo (GOPCAD_*_ERROR|) luôn là thất bại. Các dấu hiệu chung chung của AutoCAD
+        // (*Invalid*, "; error:", "Can't find file") có thể xuất hiện ngay cả khi master vẫn tạo ra bình thường,
+        // nên nếu file master đã có thì chỉ cảnh báo, không báo thất bại.
+        bool scriptReportedError = HasScriptReportedError(combinedLog);
+        bool genericFailureMarker = HasAutoCadFailure(combinedLog);
+        if ((!killedAfterOutput && process.ExitCode != 0) || scriptReportedError || (genericFailureMarker && !outputExists))
         {
             throw new InvalidOperationException("AutoCAD Core Console báo lỗi." + Environment.NewLine + GetLogTail(combinedLog));
         }
 
-        if (!string.IsNullOrWhiteSpace(expectedOutputPath) && !File.Exists(expectedOutputPath))
+        if (!string.IsNullOrWhiteSpace(expectedOutputPath) && !outputExists)
         {
             throw new InvalidOperationException($"AutoCAD chạy xong nhưng chưa tạo file DWG kết quả: {expectedOutputPath}{Environment.NewLine}{GetLogTail(combinedLog)}");
         }
+
+        if (genericFailureMarker)
+        {
+            SafeLog(logLine, $"CẢNH BÁO: AutoCAD có in thông báo lỗi nhưng vẫn tạo được master. Nên kiểm tra lại các layout. Log: {consoleLogPath}");
+        }
+    }
+
+    // logLine được gọi từ luồng đọc output của AutoCAD (không phải luồng giao diện): không để lỗi trong
+    // callback thoát ra ngoài, vì exception ở luồng nền sẽ làm sập cả ứng dụng.
+    private static void SafeLog(Action<string>? logLine, string message)
+    {
+        try
+        {
+            logLine?.Invoke(message);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
+        {
+            // Form đã đóng hoặc chưa sẵn sàng nhận log: bỏ qua dòng log này.
+        }
+    }
+
+    private static bool HasScriptReportedError(string log)
+    {
+        return log.Contains("GOPCAD_ERROR|", StringComparison.OrdinalIgnoreCase)
+            || log.Contains("GOPCAD_EXPORT_ERROR|", StringComparison.OrdinalIgnoreCase)
+            || log.Contains("GOPCAD_CLEANUP_ERROR|", StringComparison.OrdinalIgnoreCase);
     }
 
     public static void DeleteWorkingFolder(string packageFolder)
@@ -565,16 +686,6 @@ internal static class DwgPackager
         {
             Directory.Delete(packageFolder, recursive: true);
         }
-    }
-
-    public static void CreatePortableZip(string packageFolder, string zipPath)
-    {
-        if (File.Exists(zipPath))
-        {
-            File.Delete(zipPath);
-        }
-
-        ZipFile.CreateFromDirectory(packageFolder, zipPath, CompressionLevel.Optimal, includeBaseDirectory: true);
     }
 
     private static List<string> CopyDwgs(
@@ -608,6 +719,7 @@ internal static class DwgPackager
 
     private static void CleanupCopiedDwgsForMerge(
         List<string> copiedDwgs,
+        IReadOnlyList<string> originalNames,
         string? accoreConsolePath,
         string packageFolder,
         IProgress<CadProgress>? progress)
@@ -619,7 +731,7 @@ internal static class DwgPackager
 
         if (string.IsNullOrWhiteSpace(accoreConsolePath) || !File.Exists(accoreConsolePath))
         {
-            throw new InvalidOperationException("Khong tim thay AutoCAD Core Console de don viewport truoc khi gop.");
+            throw new InvalidOperationException("Không tìm thấy AutoCAD Core Console để dọn viewport trước khi gộp.");
         }
 
         string cleanupFolder = Path.Combine(packageFolder, "MERGE_CLEANUP_SCRIPT");
@@ -628,7 +740,8 @@ internal static class DwgPackager
         for (int index = 0; index < copiedDwgs.Count; index++)
         {
             string dwgPath = copiedDwgs[index];
-            progress?.Report(new CadProgress(index + 1, copiedDwgs.Count, "Dang don viewport", Path.GetFileName(dwgPath)));
+            // Hiện tên file GỐC (không phải CAD_0001.dwg là tên bản sao làm việc).
+            progress?.Report(new CadProgress(index + 1, copiedDwgs.Count, "Đang dọn viewport", originalNames[index]));
             CleanupExportedLayoutDwg(dwgPath, accoreConsolePath, cleanupFolder, index + 1);
         }
     }
@@ -839,219 +952,6 @@ internal static class DwgPackager
         return lisp.ToString();
     }
 
-    private static string BuildAutoCadLisp(List<string> copiedDwgs, string masterDwgPath, CadMergeMode mergeMode)
-    {
-        StringBuilder lisp = new();
-        lisp.AppendLine("(vl-load-com)");
-        lisp.AppendLine("(defun gopcad-progress (current total stage filename)");
-        lisp.AppendLine("  (princ (strcat \"\\nGOPCAD_PROGRESS|\" (itoa current) \"|\" (itoa total) \"|\" stage \"|\" filename))");
-        lisp.AppendLine(")");
-        lisp.AppendLine("(defun gopcad-pt (x y) (strcat (rtos x 2 8) \",\" (rtos y 2 8) \",0\"))");
-        lisp.AppendLine("(defun gopcad-safe-layout-name (idx) (strcat \"Sheet_\" (if (< idx 10) \"00\" (if (< idx 100) \"0\" \"\")) (itoa idx)))");
-        lisp.AppendLine("(defun gopcad-layout-exists (lname / dict pair found)");
-        lisp.AppendLine("  (setq dict (dictsearch (namedobjdict) \"ACAD_LAYOUT\"))");
-        lisp.AppendLine("  (setq found nil)");
-        lisp.AppendLine("  (foreach pair dict");
-        lisp.AppendLine("    (if (and (= (car pair) 3) (= (strcase (cdr pair)) (strcase lname))) (setq found T))");
-        lisp.AppendLine("  )");
-        lisp.AppendLine("  found");
-        lisp.AppendLine(")");
-        lisp.AppendLine("(defun gopcad-layout-object (lname / doc layouts result)");
-        lisp.AppendLine("  (setq doc (vla-get-ActiveDocument (vlax-get-acad-object)))");
-        lisp.AppendLine("  (setq layouts (vla-get-Layouts doc))");
-        lisp.AppendLine("  (setq result (vl-catch-all-apply 'vla-Item (list layouts lname)))");
-        lisp.AppendLine("  (if (vl-catch-all-error-p result) nil result)");
-        lisp.AppendLine(")");
-        lisp.AppendLine("(defun gopcad-set-layout (lname / doc lay)");
-        lisp.AppendLine("  (setq lay (gopcad-layout-object lname))");
-        lisp.AppendLine("  (if lay");
-        lisp.AppendLine("    (progn");
-        lisp.AppendLine("      (setq doc (vla-get-ActiveDocument (vlax-get-acad-object)))");
-        lisp.AppendLine("      (vl-catch-all-apply 'vla-put-ActiveLayout (list doc lay))");
-        lisp.AppendLine("      T");
-        lisp.AppendLine("    )");
-        lisp.AppendLine("    nil");
-        lisp.AppendLine("  )");
-        lisp.AppendLine(")");
-        lisp.AppendLine("(defun gopcad-new-layout (lname / doc layouts result)");
-        lisp.AppendLine("  (setq doc (vla-get-ActiveDocument (vlax-get-acad-object)))");
-        lisp.AppendLine("  (setq layouts (vla-get-Layouts doc))");
-        lisp.AppendLine("  (setq result (vl-catch-all-apply 'vla-Add (list layouts lname)))");
-        lisp.AppendLine("  (if (vl-catch-all-error-p result) nil result)");
-        lisp.AppendLine(")");
-        lisp.AppendLine("(defun gopcad-delete-viewports (lname / ss i ent)");
-        lisp.AppendLine("  (setq ss (ssget \"X\" (list '(0 . \"VIEWPORT\") (cons 410 lname))))");
-        lisp.AppendLine("  (if ss (progn (setq i 0) (repeat (sslength ss) (setq ent (ssname ss i)) (entdel ent) (setq i (1+ i)))))");
-        lisp.AppendLine(")");
-        lisp.AppendLine("(defun gopcad-clear-layout (lname / ss i ent)");
-        lisp.AppendLine("  (if (gopcad-layout-exists lname)");
-        lisp.AppendLine("    (progn");
-        lisp.AppendLine("      (setq ss (ssget \"X\" (list (cons 410 lname))))");
-        lisp.AppendLine("      (if ss (progn (setq i 0) (repeat (sslength ss) (setq ent (ssname ss i)) (entdel ent) (setq i (1+ i)))))");
-        lisp.AppendLine("    )");
-        lisp.AppendLine("  )");
-        lisp.AppendLine(")");
-        lisp.AppendLine("(defun gopcad-delete-layout (lname fallback / lay result)");
-        lisp.AppendLine("  (setq lay (gopcad-layout-object lname))");
-        lisp.AppendLine("  (if lay");
-        lisp.AppendLine("    (progn");
-        lisp.AppendLine("      (setq result (vl-catch-all-apply 'vla-Delete (list lay)))");
-        lisp.AppendLine("      (if (and (gopcad-layout-exists lname) fallback) (gopcad-clear-layout lname))");
-        lisp.AppendLine("    )");
-        lisp.AppendLine("  )");
-        lisp.AppendLine(")");
-        lisp.AppendLine("(defun gopcad-vpt (value) (vlax-safearray->list (vlax-variant-value value)))");
-        lisp.AppendLine("(defun gopcad-insert-block (space path x y / result)");
-        lisp.AppendLine("  (setq result (vl-catch-all-apply 'vla-InsertBlock (list space (vlax-3d-point (list x y 0.0)) path 1.0 1.0 1.0 0.0)))");
-        lisp.AppendLine("  (if (vl-catch-all-error-p result) nil result)");
-        lisp.AppendLine(")");
-        lisp.AppendLine("(defun gopcad-ensure-layer (doc lname / layers result)");
-        lisp.AppendLine("  (if (not (tblsearch \"LAYER\" lname))");
-        lisp.AppendLine("    (progn");
-        lisp.AppendLine("      (setq layers (vla-get-Layers doc))");
-        lisp.AppendLine("      (setq result (vl-catch-all-apply 'vla-Add (list layers lname)))");
-        lisp.AppendLine("      (if (vl-catch-all-error-p result) nil result)");
-        lisp.AppendLine("    )");
-        lisp.AppendLine("  )");
-        lisp.AppendLine(")");
-        lisp.AppendLine("(defun gopcad-fit-layout-entity (ent / obj minVar maxVar minp maxp width height layout paperW paperH margin targetW targetH scale centerX centerY targetX targetY)");
-        lisp.AppendLine("  (if ent");
-        lisp.AppendLine("    (progn");
-        lisp.AppendLine("      (setq obj (vlax-ename->vla-object ent))");
-        lisp.AppendLine("      (if (not (vl-catch-all-error-p (vl-catch-all-apply 'vla-getBoundingBox (list obj 'minVar 'maxVar))))");
-        lisp.AppendLine("        (progn");
-        lisp.AppendLine("          (setq minp (gopcad-vpt minVar))");
-        lisp.AppendLine("          (setq maxp (gopcad-vpt maxVar))");
-        lisp.AppendLine("          (setq width (abs (- (car maxp) (car minp))))");
-        lisp.AppendLine("          (setq height (abs (- (cadr maxp) (cadr minp))))");
-        lisp.AppendLine("          (setq layout (vla-get-ActiveLayout (vla-get-ActiveDocument (vlax-get-acad-object))))");
-        lisp.AppendLine("          (setq paperW (vla-get-PaperWidth layout))");
-        lisp.AppendLine("          (setq paperH (vla-get-PaperHeight layout))");
-        lisp.AppendLine("          (if (< paperW paperH) (setq targetW (* paperH 0.76) targetH (* paperW 0.76)) (setq targetW (* paperW 0.76) targetH (* paperH 0.76)))");
-        lisp.AppendLine("          (if (and (> width 0.0001) (> height 0.0001))");
-        lisp.AppendLine("            (progn");
-        lisp.AppendLine("              (setq scale (min (/ targetW width) (/ targetH height)))");
-        lisp.AppendLine("              (if (> scale 0.0001) (vl-catch-all-apply 'vla-ScaleEntity (list obj (vlax-3d-point '(0.0 0.0 0.0)) scale)))");
-        lisp.AppendLine("              (vla-getBoundingBox (vlax-ename->vla-object ent) 'minVar 'maxVar)");
-        lisp.AppendLine("              (setq minp (gopcad-vpt minVar))");
-        lisp.AppendLine("              (setq maxp (gopcad-vpt maxVar))");
-        lisp.AppendLine("              (setq centerX (/ (+ (car minp) (car maxp)) 2.0))");
-        lisp.AppendLine("              (setq centerY (/ (+ (cadr minp) (cadr maxp)) 2.0))");
-        lisp.AppendLine("              (setq targetX (/ paperW 2.0))");
-        lisp.AppendLine("              (setq targetY (/ paperH 2.0))");
-        lisp.AppendLine("              (vl-catch-all-apply 'vla-Move (list obj (vlax-3d-point (list centerX centerY 0.0)) (vlax-3d-point (list targetX targetY 0.0))))");
-        lisp.AppendLine("            )");
-        lisp.AppendLine("          )");
-        lisp.AppendLine("        )");
-        lisp.AppendLine("      )");
-        lisp.AppendLine("    )");
-        lisp.AppendLine("  )");
-        lisp.AppendLine(")");
-        lisp.AppendLine("(defun gopcad-place-model-entity (ent base-x / obj minVar maxVar minp maxp width height gap)");
-        lisp.AppendLine("  (setq gap 120.0)");
-        lisp.AppendLine("  (if ent");
-        lisp.AppendLine("    (progn");
-        lisp.AppendLine("      (setq obj (vlax-ename->vla-object ent))");
-        lisp.AppendLine("      (if (not (vl-catch-all-error-p (vl-catch-all-apply 'vla-getBoundingBox (list obj 'minVar 'maxVar))))");
-        lisp.AppendLine("        (progn");
-        lisp.AppendLine("          (setq minp (gopcad-vpt minVar))");
-        lisp.AppendLine("          (setq maxp (gopcad-vpt maxVar))");
-        lisp.AppendLine("          (setq width (max 1.0 (abs (- (car maxp) (car minp)))))");
-        lisp.AppendLine("          (setq height (max 1.0 (abs (- (cadr maxp) (cadr minp)))))");
-        lisp.AppendLine("          (vl-catch-all-apply 'vla-Move (list obj (vlax-3d-point (list (car minp) (cadr minp) 0.0)) (vlax-3d-point (list base-x 0.0 0.0))))");
-        lisp.AppendLine("          (+ base-x width (max gap (* width 0.06)))");
-        lisp.AppendLine("        )");
-        lisp.AppendLine("        (+ base-x 900.0)");
-        lisp.AppendLine("      )");
-        lisp.AppendLine("    )");
-        lisp.AppendLine("    (+ base-x 900.0)");
-        lisp.AppendLine("  )");
-        lisp.AppendLine(")");
-        lisp.AppendLine("(defun gopcad-main (/ acad doc modelSpace paperSpace files total idx item path obj ent ed items lname layerName base-x result layoutEnt)");
-        lisp.AppendLine("  (setvar \"FILEDIA\" 0)");
-        lisp.AppendLine("  (setvar \"CMDECHO\" 0)");
-        lisp.AppendLine("  (setvar \"INSUNITS\" 0)");
-        lisp.AppendLine("  (setvar \"TILEMODE\" 1)");
-        lisp.AppendLine("  (setvar \"XREFNOTIFY\" 0)");
-        lisp.AppendLine("  (setq acad (vlax-get-acad-object))");
-        lisp.AppendLine("  (setq doc (vla-get-ActiveDocument acad))");
-        lisp.AppendLine("  (setq modelSpace (vla-get-ModelSpace doc))");
-        lisp.AppendLine("  (setq files (list");
-        for (int index = 0; index < copiedDwgs.Count; index++)
-        {
-            string dwg = copiedDwgs[index];
-            lisp.AppendLine($"    (list {ToLispString(dwg)} {ToLispString(Path.GetFileName(dwg))})");
-        }
-        lisp.AppendLine("  ))");
-        lisp.AppendLine("  (setq total (length files) idx 0 items nil base-x 0.0)");
-        lisp.AppendLine("  (foreach item files");
-        lisp.AppendLine("    (setq idx (1+ idx) path (car item))");
-        lisp.AppendLine("    (setq layerName (strcat \"GOPCAD_\" (if (< idx 10) \"00\" (if (< idx 100) \"0\" \"\")) (itoa idx)))");
-        lisp.AppendLine("    (gopcad-ensure-layer doc layerName)");
-        lisp.AppendLine("    (gopcad-progress idx total \"Đang chèn\" (cadr item))");
-        lisp.AppendLine(mergeMode == CadMergeMode.StandaloneDwg
-            ? "    (setq obj (gopcad-insert-block modelSpace path base-x 0.0))"
-            : "    (progn (vl-cmdf \"_.-XREF\" \"ATTACH\" path \"0,0,0\" \"1\" \"1\" \"0\") (setq obj nil))");
-        lisp.AppendLine("    (setq ent (if obj (vlax-vla-object->ename obj) (entlast)))");
-        lisp.AppendLine("    (if ent");
-        lisp.AppendLine("      (progn");
-        lisp.AppendLine("        (if obj (vl-catch-all-apply 'vla-put-Layer (list obj layerName)))");
-        lisp.AppendLine("        (if (not obj)");
-        lisp.AppendLine("          (progn");
-        lisp.AppendLine("            (setq ed (entget ent))");
-        lisp.AppendLine("            (if (assoc 8 ed) (entmod (subst (cons 8 layerName) (assoc 8 ed) ed)) (entmod (append ed (list (cons 8 layerName)))))");
-        lisp.AppendLine("            (entupd ent)");
-        lisp.AppendLine("          )");
-        lisp.AppendLine("        )");
-        lisp.AppendLine("        (setq base-x (gopcad-place-model-entity ent base-x))");
-        lisp.AppendLine("        (setq items (append items (list (list idx layerName path))))");
-        lisp.AppendLine("      )");
-        lisp.AppendLine("      (gopcad-progress idx total \"Không chèn được\" (cadr item))");
-        lisp.AppendLine("    )");
-        lisp.AppendLine("  )");
-        lisp.AppendLine("  (if (> (length items) 0)");
-        lisp.AppendLine("    (gopcad-progress (length items) total \"Dang tao layout rieng\" \"Layout\")");
-        lisp.AppendLine("  )");
-        lisp.AppendLine("  (setvar \"TILEMODE\" 1)");
-        lisp.AppendLine("  (foreach item items");
-        lisp.AppendLine("    (setq idx (car item) layerName (cadr item) path (caddr item))");
-        lisp.AppendLine("    (setq lname (gopcad-safe-layout-name idx))");
-        lisp.AppendLine("    (gopcad-progress idx total \"Đang tạo layout\" lname)");
-        lisp.AppendLine("    (gopcad-delete-layout lname nil)");
-        lisp.AppendLine("    (setq result (gopcad-new-layout lname))");
-        lisp.AppendLine("    (if result");
-        lisp.AppendLine("      (progn");
-        lisp.AppendLine("        (gopcad-set-layout lname)");
-        lisp.AppendLine("        (gopcad-delete-viewports lname)");
-        lisp.AppendLine("        (setq paperSpace (vla-get-PaperSpace doc))");
-        lisp.AppendLine("        (setq obj (gopcad-insert-block paperSpace path 0.0 0.0))");
-        lisp.AppendLine("        (if (not obj)");
-        lisp.AppendLine("          (gopcad-progress idx total \"Bo qua insert layout\" lname)");
-        lisp.AppendLine("          (progn");
-        lisp.AppendLine("            (setq layoutEnt (vlax-vla-object->ename obj))");
-        lisp.AppendLine("            (gopcad-fit-layout-entity layoutEnt)");
-        lisp.AppendLine("            (gopcad-progress idx total \"Da tao layout\" lname)");
-        lisp.AppendLine("          )");
-        lisp.AppendLine("        )");
-        lisp.AppendLine("      )");
-        lisp.AppendLine("      (gopcad-progress idx total \"Bo qua layout\" lname)");
-        lisp.AppendLine("    )");
-        lisp.AppendLine("  )");
-        lisp.AppendLine("  (if (> (length items) 0) (gopcad-set-layout \"Sheet_001\"))");
-        lisp.AppendLine("  (if (> (length items) 0) (gopcad-delete-layout \"Layout1\" T))");
-        lisp.AppendLine("  (if (> (length items) 0) (gopcad-delete-layout \"Layout2\" T))");
-        lisp.AppendLine("  (if (> (length items) 0) (gopcad-set-layout \"Sheet_001\"))");
-        lisp.AppendLine("  (setvar \"TILEMODE\" 1)");
-        lisp.AppendLine("  (gopcad-progress total total \"Dang luu master\" " + ToLispString(Path.GetFileName(masterDwgPath)) + ")");
-        lisp.AppendLine("  (if (findfile " + ToLispString(masterDwgPath) + ") (vl-file-delete " + ToLispString(masterDwgPath) + "))");
-        lisp.AppendLine("  (setq result (vl-catch-all-apply 'vl-cmdf (list \"_.SAVEAS\" \"2018\" " + ToLispString(masterDwgPath) + ")))");
-        lisp.AppendLine("  (if (vl-catch-all-error-p result) (princ (strcat \"\\nGOPCAD_ERROR|SAVEAS: \" (vl-catch-all-error-message result))))");
-        lisp.AppendLine("  (if (findfile " + ToLispString(masterDwgPath) + ") (gopcad-progress total total \"Da luu master\" " + ToLispString(Path.GetFileName(masterDwgPath)) + "))");
-        lisp.AppendLine("  (vl-cmdf \"_.QUIT\" \"Y\")");
-        lisp.AppendLine(")");
-        return lisp.ToString();
-    }
-
     private static string BuildBlankDxf()
     {
         return """
@@ -1078,7 +978,7 @@ EOF
 """;
     }
 
-    private static string BuildAutoCadLispSafe(List<string> copiedDwgs, string masterDwgPath, CadMergeMode mergeMode)
+    private static string BuildAutoCadLispSafe(List<string> copiedDwgs, IReadOnlyList<string> displayNames, string masterDwgPath, CadMergeMode mergeMode)
     {
         StringBuilder lisp = new();
         lisp.AppendLine("(vl-load-com)");
@@ -1383,7 +1283,8 @@ EOF
         {
             string dwg = copiedDwgs[index];
             string blockName = Path.GetFileNameWithoutExtension(dwg);
-            lisp.AppendLine($"    (list {ToLispString(dwg)} {ToLispString(blockName)} {ToLispString(Path.GetFileName(dwg))})");
+            // Phần tử thứ 3 chỉ để in lên thanh tiến trình: tên file GỐC (bỏ dấu), không phải CAD_0001.dwg.
+            lisp.AppendLine($"    (list {ToLispString(dwg)} {ToLispString(blockName)} {ToLispString(displayNames[index])})");
         }
         lisp.AppendLine("  ))");
         lisp.AppendLine("  (setq total (length files) idx 0 items nil base-x 0.0)");

@@ -10,7 +10,9 @@ internal static class Program
     {
         try
         {
+#if REQUIRE_LOGIN
             AuthGate.Prewarm();
+#endif
 
             ApplicationConfiguration.Initialize();
             Application.ThreadException += (_, e) => ShowStartupError(e.Exception);
@@ -22,6 +24,7 @@ internal static class Program
                 }
             };
 
+#if REQUIRE_LOGIN
             using (LoginForm login = new())
             {
                 if (login.ShowDialog() != DialogResult.OK)
@@ -29,6 +32,7 @@ internal static class Program
                     return;
                 }
             }
+#endif
 
             Application.Run(new MainForm());
         }

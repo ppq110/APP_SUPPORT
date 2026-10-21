@@ -9,7 +9,8 @@
     "desktop": "npm run build && electron .",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "dist": "npm run build && node scripts/build-exe.cjs"
+    "dist": "npm run build && node scripts/build-exe.cjs",
+    "dist:nologin": "node scripts/build-exe.cjs --no-login"
   },
   "keywords": [],
   "author": "",

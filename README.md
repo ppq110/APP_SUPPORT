@@ -10,14 +10,15 @@ và secret admin nên không được để public).
 | Thư mục | Mô tả | Git |
 |---------|-------|-----|
 | `TOOL CONVERT` | App Electron chuyển TXT → Excel (khối lượng Revit) | repo riêng (remote `origin` cũ `APP_CONVERT-TXT-to-EXCEL-` trên GitHub hiện không còn truy cập được) |
-| `TOOL MERGE` | Công cụ gộp bản vẽ AutoCAD (WinForms, .NET 8), có đăng nhập | repo riêng |
+| `TOOL MERGE` | Công cụ gộp bản vẽ AutoCAD (WinForms, .NET 8), build được cả bản có và không đăng nhập | repo riêng |
 | `REVIT ADDIN` | Add-in Revit (BIMLab Bách Khoa, member) + BIMLab Studio (leader) + DynLock auth server | repo riêng |
-| `Lastest/` | Bản phát hành mới nhất (exe + hướng dẫn + zip), sinh bởi `build_lastest.ps1` | không theo dõi |
+| `Lastest/` | Bản phát hành mới nhất, chia 2 bộ (có / không cần tài khoản — xem mục Build), sinh bởi `build_lastest.ps1` | không theo dõi |
 | `GITHUB/` | Bản sao sạch để đẩy lên GitHub, sinh bởi `push_github.ps1` | repo APP_SUPPORT |
 
 ## Xác thực (đăng nhập) — DÙNG CHUNG
 
-TOOL CONVERT, TOOL MERGE, REVIT ADDIN (member) và BIMLab Studio (leader) đều xác thực qua **cùng một auth server**:
+TOOL CONVERT, TOOL MERGE, REVIT ADDIN (member) và BIMLab Studio (leader) đều xác thực qua **cùng một auth server**
+(riêng TOOL CONVERT / TOOL MERGE chỉ khi build bản "có đăng nhập", bản "không cần tài khoản" không gọi máy chủ):
 
 - URL: `https://tools.bimlab.com.vn` (hardcode trong bản build, chạy được cả ngoài mạng nội bộ, chỉ cần có internet)
 - API: `GET /api/auth/check?email=<email>` → 200 nếu email có trong bảng `authorized_leaders` và `is_active`,
@@ -33,10 +34,29 @@ TOOL CONVERT, TOOL MERGE, REVIT ADDIN (member) và BIMLab Studio (leader) đều
 
 Cần: .NET SDK 8, .NET Framework 4.8 Developer Pack, Node.js LTS (cài qua `winget`).
 
-- `TOOL CONVERT`: `npm install` rồi `npm run dist` → `release/BIMLab_Convert_TXT_To_Excel.exe`
-- `TOOL MERGE`: `SOURCE CODE/build_release.ps1` → `RELEASE/BIMLab DWG Merge.exe`
-- `REVIT ADDIN`: `SOURCE CODE/build_employee_package.ps1` → `dist/` + `deliverables/` (member và Studio)
+Một lệnh build tất cả rồi gom vào `Lastest\`:
+
+```powershell
+.\build_all.ps1        # thêm -SkipAddin / -SkipConvert / -SkipMerge để bỏ qua phần không đổi
+```
+
+Có **2 bộ phát hành** trong `Lastest\` (zip có hậu tố `CO_ACC` = cần tài khoản, `KHONG_ACC` = không cần):
+
+| Bộ | Add-in Revit (member + Studio) | TOOL CONVERT | TOOL MERGE |
+|----|:---:|:---:|:---:|
+| `1_NHU_CU_chi_Addin_co_acc` (như cũ) | cần tài khoản | không cần | không cần |
+| `2_TOAN_BO_co_acc` | cần tài khoản | cần | cần |
+
+Build lẻ từng tool:
+
+- `TOOL CONVERT`: `npm install`; `npm run dist` (có đăng nhập) → `release/`; `npm run dist:nologin` (không cần tài khoản) → `release-nologin/`
+- `TOOL MERGE`: `SOURCE CODE/build_release.ps1` (có đăng nhập) → `RELEASE/`; `build_release.ps1 -NoLogin` → `RELEASE_NOLOGIN/`
+- `REVIT ADDIN`: `SOURCE CODE/build_employee_package.ps1` → `dist/` + `deliverables/` (member và Studio, luôn có đăng nhập)
 - Gom bản phát hành: `.\build_lastest.ps1` → `Lastest/`
+
+Bản "không cần tài khoản" bỏ hẳn code đăng nhập: MERGE không biên dịch `AuthGate.cs`/`LoginForm.cs`
+(`/p:RequireLogin=false`); CONVERT build với `VITE_REQUIRE_LOGIN=false` và `requireLogin=false` trong
+`package.json` đóng gói. Mỗi bản dùng hướng dẫn riêng (bản không đăng nhập nằm ở `docs\` của từng tool).
 
 ## Đẩy source lên GitHub
 

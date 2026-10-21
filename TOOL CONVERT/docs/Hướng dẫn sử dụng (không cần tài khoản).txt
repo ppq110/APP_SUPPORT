@@ -1,0 +1,27 @@
+HƯỚNG DẪN SỬ DỤNG BIMLab CONVERT TXT TO EXCEL
+
+Mục đích:
+- Chuyển file TXT xuất khối lượng từ Revit sang file Excel đã định dạng sẵn
+- Tổng hợp khối lượng, xem Pivot Table, tùy chỉnh hệ số nhân và mapping tên cột
+
+Trước khi bắt đầu:
+- Có file TXT xuất khối lượng từ Revit
+
+1. Cài đặt
+- Chạy file `BIMLab_Convert_TXT_To_Excel.exe` (không cần cài đặt, chạy trực tiếp)
+- Bản này không cần tài khoản/Gmail và không cần kết nối mạng
+
+2. Chuyển đổi
+- Bấm `Tải file lên` (hoặc kéo thả) để chọn file TXT
+- Xem dữ liệu ở tab `Dữ liệu gốc`
+- Kiểm tra/chỉnh `Cài đặt Mapping` nếu tên cột cần đổi khác
+- Xem `Tổng hợp khối lượng` và `Pivot Table khối lượng`
+- Bấm nút xuất file để tải Excel về máy
+
+3. Xử lý lỗi cơ bản
+- App mở chậm lần đầu: bình thường, do khởi động ứng dụng
+- Sai dữ liệu sau khi chuyển: kiểm tra lại file TXT gốc có đúng định dạng xuất từ Revit không
+
+Nếu cần hỗ trợ:
+- Gửi ảnh màn hình lỗi
+- Gửi file TXT gốc (nếu có thể)
