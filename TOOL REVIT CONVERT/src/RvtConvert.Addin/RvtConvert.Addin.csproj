@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- net48 -> Revit 2024 ; net8.0-windows -> Revit 2025/2026 ; net10.0-windows -> Revit 2027 -->
+    <TargetFrameworks>net48;net8.0-windows</TargetFrameworks>
+    <TargetFrameworks Condition="$([MSBuild]::VersionGreaterThanOrEquals('$(NETCoreSdkVersion)', '10.0.0'))">net48;net8.0-windows;net10.0-windows</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
+    <UseWindowsForms>true</UseWindowsForms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>RvtConvert.Addin</RootNamespace>
+    <AssemblyName>BIMLab.RvtConvert</AssemblyName>
+    <Product>BIMLab Revit Convert</Product>
+    <Company>BIMLab</Company>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPI" Version="2024.3.40" />
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPIUI" Version="2024.3.40" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPI" Version="2025.4.50" />
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPIUI" Version="2025.4.50" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPI" Version="2027.3.0" />
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPIUI" Version="2027.2.0" />
+  </ItemGroup>
+
+</Project>

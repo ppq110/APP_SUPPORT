@@ -1,0 +1,52 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>RvtConvert.App</RootNamespace>
+    <AssemblyName>BIMLab Revit Convert</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <HasNet10 Condition="$([MSBuild]::VersionGreaterThanOrEquals('$(NETCoreSdkVersion)', '10.0.0'))">true</HasNet10>
+  </PropertyGroup>
+
+  <Target Name="BuildAddinPayloads" BeforeTargets="PrepareForBuild">
+    <MSBuild Projects="..\RvtConvert.Addin\RvtConvert.Addin.csproj" Targets="Build"
+             Properties="Configuration=$(Configuration);TargetFramework=net48" />
+    <MSBuild Projects="..\RvtConvert.Addin\RvtConvert.Addin.csproj" Targets="Build"
+             Properties="Configuration=$(Configuration);TargetFramework=net8.0-windows" />
+    <MSBuild Condition="'$(HasNet10)' == 'true'" Projects="..\RvtConvert.Addin\RvtConvert.Addin.csproj" Targets="Build"
+             Properties="Configuration=$(Configuration);TargetFramework=net10.0-windows" />
+  </Target>
+
+  <ItemGroup>
+    <PackageReference Include="OpenMcdf" Version="2.3.1" />
+    <Reference Include="UIAutomationClient" />
+    <Reference Include="UIAutomationTypes" />
+    <Reference Include="WindowsBase" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="$(NuGetPackageRoot)openmcdf/2.3.1/lib/net40/OpenMcdf.dll">
+      <LogicalName>OpenMcdf.dll</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="bimlab-logo.png">
+      <LogicalName>RvtConvert.logo.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\RvtConvert.Addin\bin\$(Configuration)\net48\BIMLab.RvtConvert.dll">
+      <LogicalName>net48.BIMLab.RvtConvert.dll</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\RvtConvert.Addin\bin\$(Configuration)\net8.0-windows\BIMLab.RvtConvert.dll">
+      <LogicalName>net8.BIMLab.RvtConvert.dll</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup Condition="'$(HasNet10)' == 'true'">
+    <EmbeddedResource Include="..\RvtConvert.Addin\bin\$(Configuration)\net10.0-windows\BIMLab.RvtConvert.dll">
+      <LogicalName>net10.BIMLab.RvtConvert.dll</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+</Project>
+
